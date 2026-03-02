@@ -5,12 +5,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.fixture
-def mock_httpx_client():
+def mock_httpx_response():
+    """Create a mock httpx response."""
+    def _create_response(json_data, status_code=200):
+        response = MagicMock()
+        response.json.return_value = json_data
+        response.status_code = status_code
+        response.raise_for_status = MagicMock()
+        response.headers = {}
+        return response
+    return _create_response
+
+
+@pytest.fixture
+def mock_httpx_client(mock_httpx_response):
     """Mock httpx client for API tests."""
-    with patch("httpx.AsyncClient") as mock:
-        client = AsyncMock()
-        mock.return_value.__aenter__.return_value = client
-        yield client
+    with patch("mcp_security.server.httpx.AsyncClient") as mock_class:
+        mock_client = AsyncMock()
+        mock_class.return_value.__aenter__.return_value = mock_client
+        mock_class.return_value.__aexit__.return_value = None
+        yield mock_client, mock_httpx_response
 
 
 @pytest.fixture

@@ -88,10 +88,8 @@ class TestCVELookup:
 
     @pytest.mark.asyncio
     async def test_cve_lookup_valid(self, mock_httpx_client, sample_cve_response):
-        mock_response = AsyncMock()
-        mock_response.json.return_value = sample_cve_response
-        mock_response.raise_for_status = MagicMock()
-        mock_httpx_client.get.return_value = mock_response
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response(sample_cve_response)
 
         result = await cve_lookup("CVE-2024-1234")
         
@@ -108,13 +106,20 @@ class TestCVELookup:
 
     @pytest.mark.asyncio
     async def test_cve_lookup_uppercase_conversion(self, mock_httpx_client, sample_cve_response):
-        mock_response = AsyncMock()
-        mock_response.json.return_value = sample_cve_response
-        mock_response.raise_for_status = MagicMock()
-        mock_httpx_client.get.return_value = mock_response
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response(sample_cve_response)
 
         result = await cve_lookup("cve-2024-1234")
         assert result["cve_id"] == "CVE-2024-1234"
+
+    @pytest.mark.asyncio
+    async def test_cve_lookup_not_found(self, mock_httpx_client):
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response({"vulnerabilities": []})
+
+        result = await cve_lookup("CVE-2099-9999")
+        assert "error" in result
+        assert "not found" in result["error"]
 
 
 class TestCVESearch:
@@ -122,18 +127,29 @@ class TestCVESearch:
 
     @pytest.mark.asyncio
     async def test_cve_search_returns_results(self, mock_httpx_client, sample_cve_response):
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response({
             "totalResults": 1,
             "vulnerabilities": sample_cve_response["vulnerabilities"]
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_httpx_client.get.return_value = mock_response
+        })
 
         result = await cve_search("nginx", None, 10)
         
         assert "keyword" in result
         assert "results" in result
+        assert result["keyword"] == "nginx"
+
+    @pytest.mark.asyncio
+    async def test_cve_search_with_severity_filter(self, mock_httpx_client, sample_cve_response):
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response({
+            "totalResults": 1,
+            "vulnerabilities": sample_cve_response["vulnerabilities"]
+        })
+
+        result = await cve_search("nginx", "HIGH", 5)
+        
+        assert "keyword" in result
         assert result["keyword"] == "nginx"
 
 
@@ -156,16 +172,15 @@ class TestIPReputation:
 
     @pytest.mark.asyncio
     async def test_ip_reputation_with_api(self, mock_httpx_client, sample_abuseipdb_response):
-        with patch("mcp_security.server.ABUSEIPDB_API_KEY", "test-key"):
-            mock_response = AsyncMock()
-            mock_response.json.return_value = sample_abuseipdb_response
-            mock_response.raise_for_status = MagicMock()
-            mock_httpx_client.get.return_value = mock_response
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response(sample_abuseipdb_response)
 
+        with patch("mcp_security.server.ABUSEIPDB_API_KEY", "test-key"):
             result = await ip_reputation("192.168.1.1")
             
             assert "checks" in result
             assert "abuseipdb" in result["checks"]
+            assert result["checks"]["abuseipdb"]["abuse_confidence_score"] == 75
 
 
 class TestSSLCheck:
@@ -188,7 +203,8 @@ class TestSecurityHeaders:
 
     @pytest.mark.asyncio
     async def test_security_headers_good_site(self, mock_httpx_client):
-        mock_response = AsyncMock()
+        mock_client, create_response = mock_httpx_client
+        mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.headers = {
             "Strict-Transport-Security": "max-age=31536000",
@@ -197,7 +213,7 @@ class TestSecurityHeaders:
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "strict-origin-when-cross-origin"
         }
-        mock_httpx_client.get.return_value = mock_response
+        mock_client.get.return_value = mock_response
 
         result = await security_headers("https://example.com")
         
@@ -208,10 +224,11 @@ class TestSecurityHeaders:
 
     @pytest.mark.asyncio
     async def test_security_headers_adds_https(self, mock_httpx_client):
-        mock_response = AsyncMock()
+        mock_client, _ = mock_httpx_client
+        mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.headers = {}
-        mock_httpx_client.get.return_value = mock_response
+        mock_client.get.return_value = mock_response
 
         result = await security_headers("example.com")
         assert result["url"] == "https://example.com"
@@ -283,17 +300,16 @@ class TestShodanHost:
 
     @pytest.mark.asyncio
     async def test_shodan_success(self, mock_httpx_client, sample_shodan_response):
-        with patch("mcp_security.server.SHODAN_API_KEY", "test-key"):
-            mock_response = AsyncMock()
-            mock_response.json.return_value = sample_shodan_response
-            mock_response.raise_for_status = MagicMock()
-            mock_httpx_client.get.return_value = mock_response
+        mock_client, create_response = mock_httpx_client
+        mock_client.get.return_value = create_response(sample_shodan_response)
 
+        with patch("mcp_security.server.SHODAN_API_KEY", "test-key"):
             result = await shodan_host("93.184.216.34")
             
             assert "hostnames" in result
             assert "ports" in result
             assert "services" in result
+            assert result["hostnames"] == ["example.com"]
 
 
 class TestGenerateReport:
